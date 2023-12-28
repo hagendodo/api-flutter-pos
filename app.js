@@ -1,6 +1,19 @@
 import express from "express";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, getDocs } from "firebase/firestore";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  doc,
+  getDoc,
+  deleteDoc,
+  query,
+  orderBy,
+  where,
+} from "firebase/firestore";
+
+import bcrypt, { compare, hash } from "bcrypt";
 import dotenv from "dotenv";
 import cors from "cors";
 import { Storage } from "@google-cloud/storage";
@@ -26,6 +39,7 @@ const db = getFirestore(apps);
 
 const itemsCollection = collection(db, "items");
 const ordersCollection = collection(db, "orders");
+const usersCollection = collection(db, "users");
 
 app.use(
   cors({
@@ -37,6 +51,119 @@ app.use(
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.post("/api/register", async (req, res) => {
+  try {
+    const { kodeToko, namaToko, username, password } = req.body;
+
+    if (!namaToko || !username || !password) {
+      return res.status(400).json({
+        error: "Bad Request - Nama Toko, Username, and password are required",
+      });
+    }
+
+    // Hash the password before storing it
+    const hashedPassword = await hash(password, 10); // You can adjust the saltRounds as needed
+
+    // Store user data in Firestore
+    const userRef = await addDoc(collection(db, "users"), {
+      kodeToko: kodeToko,
+      namaToko: namaToko,
+      username: username,
+      hashedPassword: hashedPassword,
+      role: "owner",
+    });
+
+    res.status(201).json({ uid: userRef.id });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Login route
+app.post("/api/login", async (req, res) => {
+  try {
+    const { kode, username, password } = req.body;
+
+    if (!username || !kode || !password) {
+      return res.status(400).json({
+        error: "Bad Request - Username, Kode, and password are required",
+      });
+    }
+
+    const querySnapshot = await getDocs(
+      query(usersCollection, where("kodeToko", "==", kode))
+    );
+
+    let data = null;
+    let docId = "";
+
+    querySnapshot.forEach((doc) => {
+      if (doc.exists()) {
+        docId = doc.id;
+        data = doc.data();
+      }
+    });
+
+    if (!data) {
+      return res.status(201).json({ error: "Unauthorized - User not found" });
+    }
+
+    if (data.username !== username) {
+      return res.status(201).json({ error: "Unauthorized - User not found" });
+    }
+
+    const passwordMatch = await compare(password, data.hashedPassword);
+    if (!passwordMatch) {
+      return res.status(201).json({ error: "Unauthorized - User not found" });
+    }
+
+    return res.status(200).json({
+      id: docId,
+      data: data,
+    });
+
+    // // Step 1: Check if the user with the provided username and kode exists
+    // const userQuery = query(
+    //   collection(db, "users"),
+    //   where("username", "==", username)
+    // );
+    // const userQuerySnapshot = await getDocs(userQuery);
+
+    // if (userQuerySnapshot.empty) {
+    //   return res.status(201).json({ error: "Unauthorized - User not found" });
+    // }
+
+    // // Assuming there's only one user with the given username and kode
+    // const userDoc = userQuerySnapshot.docs[0];
+    // console.log(userQuerySnapshot.docs[0]);
+    // // Step 2: Check if kode is equal to the _id of the document
+    // const documentId = userDoc.data()._id;
+
+    // if (documentId === kode) {
+    //   // Step 3: Validate the provided password using bcrypt
+    //   const storedHashedPassword = userDoc.data().hashedPassword;
+
+    //   // Compare the stored hashed password with the provided password
+    //   const passwordMatch = await bcrypt.compare(
+    //     password,
+    //     storedHashedPassword
+    //   );
+
+    //   if (passwordMatch) {
+    //     res.status(200).json({ uid: userDoc.id });
+    //   } else {
+    //     res.status(401).json({ error: "Unauthorized - Invalid password" });
+    //   }
+    // } else {
+    //   res.status(401).json({ error: "Unauthorized - Invalid Kode" });
+    // }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 app.post("/api/orders", async (req, res) => {
   try {
@@ -57,9 +184,28 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
+// Read all items
+app.get("/api/orders", async (req, res) => {
+  try {
+    const snapshot = await getDocs(
+      query(collection(db, "orders"), orderBy("tanggal", "desc"))
+    );
+
+    // Use map to create an array of items
+    const items = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.status(200).json(items);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // Create item
 app.post("/api/items", async (req, res) => {
-  console.log("here");
   try {
     // Ensure req.body is not empty
     if (!req.body) {
@@ -169,7 +315,7 @@ app.put("/api/items/:id", async (req, res) => {
 app.delete("/api/items/:id", async (req, res) => {
   try {
     const itemId = req.params.id;
-    await itemsCollection.doc(itemId).delete();
+    await deleteDoc(doc(db, "items", itemId));
 
     res.json({ success: true });
   } catch (error) {
