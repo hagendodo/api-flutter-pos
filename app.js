@@ -18,12 +18,6 @@ import dotenv from "dotenv";
 import cors from "cors";
 import { Storage } from "@google-cloud/storage";
 import { v4 as uuidv4 } from "uuid";
-const storage = new Storage();
-
-dotenv.config();
-
-const app = express();
-const port = process.env.PORT || 3000;
 
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY,
@@ -34,6 +28,10 @@ const firebaseConfig = {
   appId: process.env.FIREBASE_APP_ID,
 };
 
+dotenv.config();
+const storage = new Storage();
+const app = express();
+const port = process.env.PORT || 3000;
 const apps = initializeApp(firebaseConfig);
 const db = getFirestore(apps);
 
@@ -48,7 +46,6 @@ app.use(
     credentials: true,
   })
 );
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
