@@ -6,14 +6,14 @@ import {
   addDoc,
   getDocs,
   doc,
-  getDoc,
+  updateDoc,
   deleteDoc,
   query,
   orderBy,
   where,
 } from "firebase/firestore";
 
-import bcrypt, { compare, hash } from "bcrypt";
+import { compare, hash } from "bcrypt";
 import dotenv from "dotenv";
 import cors from "cors";
 import { Storage } from "@google-cloud/storage";
@@ -54,25 +54,45 @@ app.use(express.urlencoded({ extended: true }));
 
 app.post("/api/register", async (req, res) => {
   try {
-    const { kodeToko, namaToko, username, password } = req.body;
+    const { kodeToko, namaToko, kodeCabang, namaCabang, username, password } =
+      req.body;
 
-    if (!namaToko || !username || !password) {
+    if (!username || !password) {
       return res.status(400).json({
-        error: "Bad Request - Nama Toko, Username, and password are required",
+        error: "Bad Request - Username and password are required",
       });
     }
 
-    // Hash the password before storing it
-    const hashedPassword = await hash(password, 10); // You can adjust the saltRounds as needed
+    let userData;
+
+    if (kodeToko && namaToko) {
+      // Registration for "toko"
+      userData = {
+        kodeToko,
+        namaToko,
+        username,
+        hashedPassword: await hash(password, 10),
+        role: "owner",
+      };
+    } else if (kodeCabang && namaCabang) {
+      // Registration for "cabang"
+      userData = {
+        kodeToko,
+        kodeCabang,
+        namaCabang,
+        username,
+        hashedPassword: await hash(password, 10),
+        role: "cabang",
+      };
+    } else {
+      // Invalid request without kodeToko or kodeCabang
+      return res.status(400).json({
+        error: "Bad Request - Either kodeToko or kodeCabang is required",
+      });
+    }
 
     // Store user data in Firestore
-    const userRef = await addDoc(collection(db, "users"), {
-      kodeToko: kodeToko,
-      namaToko: namaToko,
-      username: username,
-      hashedPassword: hashedPassword,
-      role: "owner",
-    });
+    const userRef = await addDoc(collection(db, "users"), userData);
 
     res.status(201).json({ uid: userRef.id });
   } catch (error) {
@@ -86,15 +106,25 @@ app.post("/api/login", async (req, res) => {
   try {
     const { kode, username, password } = req.body;
 
+    const checkingKode = kode.substring(0, 2);
+
     if (!username || !kode || !password) {
       return res.status(400).json({
         error: "Bad Request - Username, Kode, and password are required",
       });
     }
 
-    const querySnapshot = await getDocs(
-      query(usersCollection, where("kodeToko", "==", kode))
-    );
+    let querySnapshot;
+
+    if (checkingKode == "CB") {
+      querySnapshot = await getDocs(
+        query(usersCollection, where("kodeCabang", "==", kode))
+      );
+    } else {
+      querySnapshot = await getDocs(
+        query(usersCollection, where("kodeToko", "==", kode))
+      );
+    }
 
     let data = null;
     let docId = "";
@@ -123,42 +153,78 @@ app.post("/api/login", async (req, res) => {
       id: docId,
       data: data,
     });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
-    // // Step 1: Check if the user with the provided username and kode exists
-    // const userQuery = query(
-    //   collection(db, "users"),
-    //   where("username", "==", username)
-    // );
-    // const userQuerySnapshot = await getDocs(userQuery);
+app.patch("/api/users/:userId", async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const { kodeToko, namaToko, username, password } = req.body;
 
-    // if (userQuerySnapshot.empty) {
-    //   return res.status(201).json({ error: "Unauthorized - User not found" });
-    // }
+    // Check if at least one field is provided for update
+    if (!kodeToko && !namaToko && !username && !password) {
+      console.log("here");
+      return res.status(400).json({
+        error: "Bad Request - At least one field is required for update",
+      });
+    }
 
-    // // Assuming there's only one user with the given username and kode
-    // const userDoc = userQuerySnapshot.docs[0];
-    // console.log(userQuerySnapshot.docs[0]);
-    // // Step 2: Check if kode is equal to the _id of the document
-    // const documentId = userDoc.data()._id;
+    // Prepare an object with fields to update
+    const updateFields = {};
+    if (kodeToko) updateFields.kodeToko = kodeToko;
+    if (namaToko) updateFields.namaToko = namaToko;
+    if (username) updateFields.username = username;
 
-    // if (documentId === kode) {
-    //   // Step 3: Validate the provided password using bcrypt
-    //   const storedHashedPassword = userDoc.data().hashedPassword;
+    // Hash the password before storing it
+    if (password) {
+      const hashedPassword = await hash(password, 10); // You can adjust the saltRounds as needed
+      updateFields.hashedPassword = hashedPassword;
+    }
 
-    //   // Compare the stored hashed password with the provided password
-    //   const passwordMatch = await bcrypt.compare(
-    //     password,
-    //     storedHashedPassword
-    //   );
+    // Perform the update in Firestore
+    await updateDoc(doc(db, "users", userId), updateFields);
 
-    //   if (passwordMatch) {
-    //     res.status(200).json({ uid: userDoc.id });
-    //   } else {
-    //     res.status(401).json({ error: "Unauthorized - Invalid password" });
-    //   }
-    // } else {
-    //   res.status(401).json({ error: "Unauthorized - Invalid Kode" });
-    // }
+    res.status(200).json({ id: userId });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/api/cabang/:kodeToko", async (req, res) => {
+  try {
+    const kodeToko = req.params.kodeToko;
+
+    if (!kodeToko) {
+      return res.status(404).json({ error: "Kode Toko not found" });
+    }
+
+    let baseQuery = query(usersCollection, where("kodeToko", "==", kodeToko));
+
+    baseQuery = query(baseQuery, where("role", "==", "cabang"));
+
+    const querySnapshot = await getDocs(baseQuery);
+    const data = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.status(200).json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.delete("/api/cabang/:id", async (req, res) => {
+  try {
+    const itemId = req.params.id;
+    await deleteDoc(doc(db, "users", itemId));
+
+    res.json({ success: true });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -187,9 +253,24 @@ app.post("/api/orders", async (req, res) => {
 // Read all items
 app.get("/api/orders", async (req, res) => {
   try {
-    const snapshot = await getDocs(
-      query(collection(db, "orders"), orderBy("tanggal", "desc"))
-    );
+    const { kodeToko, kodeCabang } = req.query;
+    const cekCabang = kodeCabang && kodeCabang !== "";
+
+    if (!kodeToko) {
+      return res.status(404).json({ error: "Kode Toko not found" });
+    }
+
+    let baseQuery = query(ordersCollection, where("kodeToko", "==", kodeToko));
+
+    if (cekCabang) {
+      baseQuery = query(baseQuery, where("kodeCabang", "==", kodeCabang));
+    }
+
+    const snapshot = await getDocs(baseQuery, orderBy("tanggal", "desc"));
+    // Check if no orders were found
+    if (snapshot.empty) {
+      return res.status(404).json({ error: "No orders found" });
+    }
 
     // Use map to create an array of items
     const items = snapshot.docs.map((doc) => ({
@@ -208,53 +289,70 @@ app.get("/api/orders", async (req, res) => {
 app.post("/api/items", async (req, res) => {
   try {
     // Ensure req.body is not empty
+    console.log(req.body);
     if (!req.body) {
       return res.status(400).json({ error: "Bad Request - Empty body" });
     }
 
     // Extract other fields from the request body
-    const { name, price } = req.body;
+    const { userId, kodeToko, name, price, imageUrl } = req.body;
 
-    // Handle file upload
-    const file = req.file;
-    if (!file) {
-      return res.status(400).json({ error: "Bad Request - No file uploaded" });
-    }
+    if (!imageUrl) {
+      // Handle file upload
+      const file = req.file;
+      if (!file) {
+        return res
+          .status(400)
+          .json({ error: "Bad Request - No file uploaded" });
+      }
 
-    // Upload the image to Firebase Storage
-    const bucket = storage.bucket("image-flutter-pos"); // Replace with your actual Firebase Storage bucket name
-    const fileName = `${Date.now()}_${uuidv4()}`;
-    const fileUpload = bucket.file(fileName);
+      // Upload the image to Firebase Storage
+      const bucket = storage.bucket("image-flutter-pos"); // Replace with your actual Firebase Storage bucket name
+      const fileName = `${Date.now()}_${uuidv4()}`;
+      const fileUpload = bucket.file(fileName);
 
-    const stream = fileUpload.createWriteStream({
-      metadata: {
-        contentType: file.mimetype,
-      },
-    });
+      const stream = fileUpload.createWriteStream({
+        metadata: {
+          contentType: file.mimetype,
+        },
+      });
 
-    stream.on("error", (err) => {
-      console.error(err);
-      res
-        .status(500)
-        .json({ error: "Internal Server Error - Image upload failed" });
-    });
+      stream.on("error", (err) => {
+        console.error(err);
+        res
+          .status(500)
+          .json({ error: "Internal Server Error - Image upload failed" });
+      });
 
-    stream.on("finish", async () => {
-      // The image has been successfully uploaded to Firebase Storage
-      // Get the download URL
-      const downloadUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+      stream.on("finish", async () => {
+        // The image has been successfully uploaded to Firebase Storage
+        // Get the download URL
+        const downloadUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
 
-      // Create a new document in Firestore with the image URL and other details
+        // Create a new document in Firestore with the image URL and other details
+        const newItemRef = await addDoc(itemsCollection, {
+          name,
+          price,
+          imageUrl: downloadUrl,
+        });
+
+        res.status(201).json({ id: newItemRef.id });
+      });
+
+      stream.end(file.buffer);
+    } else {
+      // Handle case where imageUrl is provided (not uploading a file)
+      // Create a new document in Firestore with the provided image URL and other details
       const newItemRef = await addDoc(itemsCollection, {
+        userId,
+        kodeToko,
         name,
         price,
-        imageUrl: downloadUrl,
+        imageUrl,
       });
 
       res.status(201).json({ id: newItemRef.id });
-    });
-
-    stream.end(file.buffer);
+    }
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -264,15 +362,26 @@ app.post("/api/items", async (req, res) => {
 // Read all items
 app.get("/api/items", async (req, res) => {
   try {
-    const snapshot = await getDocs(itemsCollection);
+    const { kodeToko, kodeCabang } = req.query;
+    const cekCabang = kodeCabang && kodeCabang !== "";
 
-    // Use map to create an array of items
-    const items = snapshot.docs.map((doc) => ({
+    if (!kodeToko) {
+      return res.status(404).json({ error: "Kode Toko not found" });
+    }
+
+    let baseQuery = query(itemsCollection, where("kodeToko", "==", kodeToko));
+
+    if (cekCabang) {
+      baseQuery = query(baseQuery, where("kodeCabang", "==", kodeCabang));
+    }
+
+    const querySnapshot = await getDocs(baseQuery);
+    const data = querySnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
 
-    res.json(items);
+    res.status(200).json(data);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
