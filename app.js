@@ -361,7 +361,7 @@ app.get("/api/items/:id", async (req, res) => {
 });
 
 // Update item
-app.put("/api/items/:id", async (req, res) => {
+app.patch("/api/items/:id", async (req, res) => {
   try {
     const itemId = req.params.id;
     const itemDoc = itemsCollection.doc(itemId);
