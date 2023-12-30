@@ -12,15 +12,10 @@ import {
   orderBy,
   where,
 } from "firebase/firestore";
-
 import { compare, hash } from "bcrypt";
 import dotenv from "dotenv";
 import cors from "cors";
-import { Storage } from "@google-cloud/storage";
 import { v4 as uuidv4 } from "uuid";
-import { getStorage, ref, uploadBytes } from "firebase/storage";
-import multer from "multer";
-const storage = new Storage();
 
 dotenv.config();
 
@@ -42,9 +37,6 @@ const db = getFirestore(apps);
 const itemsCollection = collection(db, "items");
 const ordersCollection = collection(db, "orders");
 const usersCollection = collection(db, "users");
-
-const storageConfig = multer.memoryStorage();
-const upload = multer({ storage: storageConfig });
 
 app.use(
   cors({
@@ -294,7 +286,6 @@ app.get("/api/orders", async (req, res) => {
 app.post("/api/items", async (req, res) => {
   try {
     // Ensure req.body is not empty
-    console.log(req.body);
     if (!req.body) {
       return res.status(400).json({ error: "Bad Request - Empty body" });
     }
@@ -303,48 +294,7 @@ app.post("/api/items", async (req, res) => {
     const { userId, kodeToko, name, price, imageUrl } = req.body;
 
     if (!imageUrl) {
-      // Handle file upload
-      const file = req.file;
-      if (!file) {
-        return res
-          .status(400)
-          .json({ error: "Bad Request - No file uploaded" });
-      }
-
-      // Upload the image to Firebase Storage
-      const bucket = storage.bucket("image-flutter-pos"); // Replace with your actual Firebase Storage bucket name
-      const fileName = `${Date.now()}_${uuidv4()}`;
-      const fileUpload = bucket.file(fileName);
-
-      const stream = fileUpload.createWriteStream({
-        metadata: {
-          contentType: file.mimetype,
-        },
-      });
-
-      stream.on("error", (err) => {
-        console.error(err);
-        res
-          .status(500)
-          .json({ error: "Internal Server Error - Image upload failed" });
-      });
-
-      stream.on("finish", async () => {
-        // The image has been successfully uploaded to Firebase Storage
-        // Get the download URL
-        const downloadUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
-
-        // Create a new document in Firestore with the image URL and other details
-        const newItemRef = await addDoc(itemsCollection, {
-          name,
-          price,
-          imageUrl: downloadUrl,
-        });
-
-        res.status(201).json({ id: newItemRef.id });
-      });
-
-      stream.end(file.buffer);
+      return res.status(400).json({ error: "Bad Request - No file uploaded" });
     } else {
       // Handle case where imageUrl is provided (not uploading a file)
       // Create a new document in Firestore with the provided image URL and other details
@@ -365,58 +315,28 @@ app.post("/api/items", async (req, res) => {
 });
 
 // Read all items
-app.post("/api/items", upload.single("file"), async (req, res) => {
+app.get("/api/items", async (req, res) => {
   try {
-    // Ensure req.body is not empty
-    console.log(req.body);
-    if (!req.body) {
-      return res.status(400).json({ error: "Bad Request - Empty body" });
+    const { kodeToko, kodeCabang } = req.query;
+    const cekCabang = kodeCabang && kodeCabang !== "";
+
+    if (!kodeToko) {
+      return res.status(404).json({ error: "Kode Toko not found" });
     }
 
-    // Extract other fields from the request body
-    const { userId, kodeToko, name, price, imageUrl } = req.body;
+    let baseQuery = query(itemsCollection, where("kodeToko", "==", kodeToko));
 
-    if (!imageUrl) {
-      // Handle file upload
-      const file = req.file;
-      if (!file) {
-        return res
-          .status(400)
-          .json({ error: "Bad Request - No file uploaded" });
-      }
-
-      // Upload the image to Firebase Storage
-      const fileName = `${Date.now()}_${uuidv4()}`;
-      const fileRef = ref(storage, `image-flutter-pos/${fileName}`);
-
-      await uploadBytes(fileRef, file.buffer);
-
-      // Get the download URL
-      const downloadUrl = `https://storage.googleapis.com/${storage.bucket}/image-flutter-pos/${fileName}`;
-
-      // Create a new document in Firestore with the image URL and other details
-      const newItemRef = await addDoc(collection(db, "items"), {
-        userId,
-        kodeToko,
-        name,
-        price,
-        imageUrl: downloadUrl,
-      });
-
-      res.status(201).json({ id: newItemRef.id });
-    } else {
-      // Handle case where imageUrl is provided (not uploading a file)
-      // Create a new document in Firestore with the provided image URL and other details
-      const newItemRef = await addDoc(collection(db, "items"), {
-        userId,
-        kodeToko,
-        name,
-        price,
-        imageUrl,
-      });
-
-      res.status(201).json({ id: newItemRef.id });
+    if (cekCabang) {
+      baseQuery = query(baseQuery, where("kodeCabang", "==", kodeCabang));
     }
+
+    const querySnapshot = await getDocs(baseQuery);
+    const data = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.status(200).json(data);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
