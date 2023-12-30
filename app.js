@@ -11,6 +11,8 @@ import {
   query,
   orderBy,
   where,
+  getDoc,
+  setDoc,
 } from "firebase/firestore";
 import { compare, hash } from "bcrypt";
 import dotenv from "dotenv";
@@ -364,9 +366,12 @@ app.get("/api/items/:id", async (req, res) => {
 app.patch("/api/items/:id", async (req, res) => {
   try {
     const itemId = req.params.id;
-    const itemDoc = itemsCollection.doc(itemId);
+    // const itemDoc = getDoc(itemsCollection, itemId);
 
-    const updatedItem = await itemDoc.set(req.body, { merge: true });
+    // const updatedItem = await itemDoc.set(req.body, { merge: true });
+
+    const cityRef = doc(db, "items", itemId);
+    await setDoc(cityRef, req.body, { merge: true });
 
     res.json({ id: itemId, ...updatedItem });
   } catch (error) {
