@@ -371,7 +371,7 @@ app.patch("/api/items/:id", async (req, res) => {
     // const updatedItem = await itemDoc.set(req.body, { merge: true });
 
     const cityRef = doc(db, "items", itemId);
-    await setDoc(cityRef, req.body, { merge: true });
+    const updatedItem = await setDoc(cityRef, req.body, { merge: true });
 
     res.json({ id: itemId, ...updatedItem });
   } catch (error) {
