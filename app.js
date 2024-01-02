@@ -132,7 +132,7 @@ app.post("/api/login", async (req, res) => {
       if (doc.exists()) {
         docId = doc.id;
         data = doc.data();
-        data.namaToko = "";
+        data["namaToko"] = "";
       }
     });
 
